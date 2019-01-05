@@ -31,27 +31,47 @@
 
 
 #### 相机校正(Camera Calibration)
-这里会使用opencv提供的方法通过棋盘格图片组计算相机校正矩阵(camera calibration matrix)和失真系数(distortion coefficients)。首先要得到棋盘格内角的世界坐标"object points"和对应图片坐标"image point"。假设棋盘格内角世界坐标的z轴为0，棋盘在(x,y)面上，则对于每张棋盘格图片组的图片而言，对应"object points"都是一样的。而通过使用openCv的cv2.findChessboardCorners()，传入棋盘格的灰度(grayscale)图片和横纵内角点个数就可得到图片内角的"image point"。
+这里会使用opencv提供的方法通过棋盘格图片组计算相机校正矩阵(camera calibration matrix)和失真系数(distortion coefficients)。首先要得到棋盘格内角的世界坐标"object points"和对应图片坐标"image point"。假设棋盘格内角世界坐标的z轴为0，棋盘在(x,y)面上，则对于每张棋盘格图片组的图片而言，对应"object points"都是一样的。而通过使用openCv的cv:findChessboardCorners()，传入棋盘格的灰度(grayscale)图片和横纵内角点个数就可得到图片内角的"image point"。
 ```
 
-def get_obj_img_points(images,grid=(9,6)):
-    object_points=[]
-    img_points = []
-    for img in images:
-        #生成object points
-        object_point = np.zeros( (grid[0]*grid[1],3),np.float32 )
-        object_point[:,:2]= np.mgrid[0:grid[0],0:grid[1]].T.reshape(-1,2)
-        #得到灰度图片
-        gray = cv2.cvtColor(img,cv2.COLOR_BGR2GRAY)
-        #得到图片的image points
-        ret, corners = cv2.findChessboardCorners(gray, grid, None)
-        if ret:
-            object_points.append(object_point)
-            img_points.append(corners)
-    return object_points,img_points
+void get_obj_img_points(const vector<string> & images,const cv::Size & grid,const cv::Size& distance,cv::Mat& cameraMatirx,cv::Mat& distCoeffs){
+    cv::Mat img,gray;//灰度图像
+    vector<cv::Point2f> corners;//用来储存t图片角点
+    vector<cv::Point3f> object_point;//保存标定板上所有角点坐标
+    vector<cv::Mat> rvecs,tvecs;//旋转向量和位移向量
+    vector<vector<cv::Point3f>> object_points;//棋盘格三维坐标容器
+    vector<vector<cv::Point2f>> img_points;//棋盘格角点容器
+    for(auto & imgdir:images){
+        //载入图像
+        img=cv::imread(imgdir);
+        //生成object points
+        for(int i=0;i<grid.height;i++){
+            for(int j=0;j<grid.width;j++){
+                object_point.push_back(cv::Point3f(i*distance.width,j*distance.height,0));//向容器存入每个角点坐标
+            }
+        }
+        //得到灰度图片
+        cv::cvtColor(img,gray,cv::COLOR_BGR2GRAY);
+        //得到图片的image points
+        //NOTE corners的储存方式为从左往右，从上往下每行储存，所以储存object_point的时候需从grid。width开始遍历储存
+        bool ret=cv::findChessboardCorners(gray,grid,corners,cv::CALIB_CB_ADAPTIVE_THRESH+cv::CALIB_CB_NORMALIZE_IMAGE+cv::CALIB_CB_FAST_CHECK);
+        if(ret){//亚像素精细化
+            cv::cornerSubPix(gray,corners,cv::Size(11,11),cv::Size(-1,-1),
+            cv::TermCriteria(cv::TermCriteria::COUNT+cv::TermCriteria::EPS, 30, 0.1));
+            img_points.push_back(corners);
+            object_points.push_back(object_point);
+        }
+        object_point.clear();//清空object_point以便下一幅图使用该容器
+        //绘制角点并显示
+        cv::drawChessboardCorners(img,grid,cv::Mat(corners),ret);
+        // cv::imshow("chessboard corners",img);
+        // cv::waitKey(10);
+    }
+    cv::calibrateCamera(object_points,img_points,img.size(),cameraMatirx,distCoeffs,rvecs,tvecs);
+}
     
 ```
-然后使用上方法得到的`object_points` and `img_points` 传入`cv2.calibrateCamera()` 方法中就可以计算出相机校正矩阵(camera calibration matrix)和失真系数(distortion coefficients)，再使用 `cv2.undistort()`方法就可得到校正图片。
+然后使用上方法得到的`object_points` and `img_points` 传入`cv：calibrateCamera()` 方法中就可以计算出相机校正矩阵(camera calibration matrix)和失真系数(distortion coefficients)，再使用 `cv：undistort()`方法就可得到校正图片。
 ```
 def cal_undistort(img, objpoints, imgpoints):
     ret, mtx, dist, rvecs, tvecs = cv2.calibrateCamera(objpoints, imgpoints, img.shape[1::-1], None, None)
@@ -65,18 +85,10 @@ def cal_undistort(img, objpoints, imgpoints):
 #### 校正测试图片
 代码如下：
 ```
-#获取棋盘格图片
-cal_imgs = utils.get_images_by_dir('camera_cal')
-#计算object_points,img_points
-object_points,img_points = utils.calibrate(cal_imgs,grid=(9,6))
-#获取测试图片
-test_imgs = utils.get_images_by_dir('test_images')
-
-#校正测试图片
-undistorted = []
-for img in test_imgs:
-    img = utils.cal_undistort(img,object_points,img_points)
-    undistorted.append(img)
+//获取棋盘格图片
+get_images_by_dir(cal_dir,filetype,imgs);
+//计算矫正系数
+get_obj_img_points(imgs,grid,distance,cameraMatirx,distCoeffs);
 ```
 测试图片校正前后对比：
 ![alt text][image2]
@@ -84,26 +96,30 @@ for img in test_imgs:
 #### 阈值过滤(thresholding)
 这里会使用梯度阈值(gradient threshold)，颜色阈值(color threshold)等来处理校正后的图片，捕获车道线所在位置的像素。(这里的梯度指的是颜色变化的梯度)
 
-以下方法通过"cv2.Sobel()"方法计算x轴方向或y轴方向的颜色变化梯度导数，并以此进行阈值过滤(thresholding),得到二进制图(binary image)：
+以下方法通过"cv：Sobel()"方法计算x轴方向或y轴方向的颜色变化梯度导数，并以此进行阈值过滤(thresholding),得到二进制图(binary image)：
 ```
-def abs_sobel_thresh(img, orient='x', thresh_min=0, thresh_max=255):
-    #装换为灰度图片
-    gray = cv2.cvtColor(img, cv2.COLOR_RGB2GRAY)
-    #使用cv2.Sobel()计算计算x方向或y方向的导数
-    if orient == 'x':
-        abs_sobel = np.absolute(cv2.Sobel(gray, cv2.CV_64F, 1, 0))
-    if orient == 'y':
-        abs_sobel = np.absolute(cv2.Sobel(gray, cv2.CV_64F, 0, 1))
-    #阈值过滤
-    scaled_sobel = np.uint8(255*abs_sobel/np.max(abs_sobel))
-    binary_output = np.zeros_like(scaled_sobel)
-    binary_output[(scaled_sobel >= thresh_min) & (scaled_sobel <= thresh_max)] = 1
-
-    return binary_output
+void abs_sobel_thresh(const cv::Mat& src,cv::Mat& dst,const char& orient='x',const int& thresh_min=0,const int& thresh_max=255){
+    cv::Mat src_gray,grad;
+    cv::Mat abs_gray;
+    //转换成为灰度图片
+    cv::cvtColor(src,src_gray,cv::COLOR_RGB2GRAY);
+    //使用cv::Sobel()计算x方向或y方向的导
+    if(orient=='x'){
+        cv::Sobel(src_gray,grad,CV_64F,1,0);
+        cv::convertScaleAbs(grad,abs_gray);
+    }
+    if(orient=='y'){
+        cv::Sobel(src_gray,grad,CV_64F,0,1);
+        cv::convertScaleAbs(grad,abs_gray);
+    }
+    //二值化
+    cv::inRange(abs_gray,thresh_min,thresh_max,dst);
+    // cv::threshold(abs_gray,dst,thresh_min,thresh_max,cv::THRESH_BINARY|cv::THRESH_OTSU);
+}
 ```
 通过测试发现使用x轴方向阈值在35到100区间过滤得出的二进制图可以捕捉较为清晰的车道线：
 ```
-x_thresh = utils.abs_sobel_thresh(img, orient='x', thresh_min=35, thresh_max=100)
+abs_sobel_thresh(imge,absm,'x',55,200);//sobel边缘识别
 ```
 以下为使用上面方法应用测试图片的过滤前后对比图：
 ![alt text][image3]
@@ -112,27 +128,28 @@ x_thresh = utils.abs_sobel_thresh(img, orient='x', thresh_min=35, thresh_max=100
 
 接下来测试一下使用全局的颜色变化梯度来进行阈值过滤：
 ```
-def mag_thresh(img, sobel_kernel=3, mag_thresh=(0, 255)):
-    # Convert to grayscale
-    gray = cv2.cvtColor(img, cv2.COLOR_RGB2GRAY)
-    # Take both Sobel x and y gradients
-    sobelx = cv2.Sobel(gray, cv2.CV_64F, 1, 0, ksize=sobel_kernel)
-    sobely = cv2.Sobel(gray, cv2.CV_64F, 0, 1, ksize=sobel_kernel)
-    # Calculate the gradient magnitude
-    gradmag = np.sqrt(sobelx**2 + sobely**2)
-    # Rescale to 8 bit
-    scale_factor = np.max(gradmag)/255 
-    gradmag = (gradmag/scale_factor).astype(np.uint8) 
-    # Create a binary image of ones where threshold is met, zeros otherwise
-    binary_output = np.zeros_like(gradmag)
-    binary_output[(gradmag >= mag_thresh[0]) & (gradmag <= mag_thresh[1])] = 1
+void mag_thresh(const cv::Mat& src,cv::Mat& dst,const int& sobel_kernel=3,const int& thresh_min=0,const int& thresh_max=255){
+    cv::Mat src_gray,gray_x,gray_y,grad;
+    cv::Mat abs_gray_x,abs_gray_y;
+    //转换成为灰度图片
+    cv::cvtColor(src,src_gray,cv::COLOR_RGB2GRAY);
+    //使用cv::Sobel()计算x方向或y方向的导
+    cv::Sobel(src_gray,gray_x,CV_64F,1,0,sobel_kernel);
+    cv::Sobel(src_gray,gray_y,CV_64F,0,1,sobel_kernel);
+    //转换成CV_8U
+    cv::convertScaleAbs(gray_x,abs_gray_x);
+    cv::convertScaleAbs(gray_y,abs_gray_y);
+    //合并x和y方向的梯度
+    cv::addWeighted(abs_gray_x,0.5,abs_gray_y,0.5,0,grad);
+    //二值化
+    cv::inRange(grad,thresh_min,thresh_max,dst);
+    // cv::threshold(grad,dst,thresh_min,thresh_max,cv::THRESH_BINARY|cv::THRESH_OTSU);
 
-    # Return the binary image
-    return binary_output
+}
 
 ```
 ```
-mag_thresh = utils.mag_thresh(img, sobel_kernel=9, mag_thresh=(50, 100))
+mag_thresh(imge,mag,3,45,150);
 ```
 
 ![alt text][image4]
@@ -143,20 +160,34 @@ mag_thresh = utils.mag_thresh(img, sobel_kernel=9, mag_thresh=(50, 100))
 下面为使用hls颜色空间的s通道进行阈值过滤：
 
 ```
-def hls_select(img,channel='s',thresh=(0, 255)):
-    hls = cv2.cvtColor(img, cv2.COLOR_RGB2HLS)
-    if channel=='h':
-        channel = hls[:,:,0]
-    elif channel=='l':
-        channel=hls[:,:,1]
-    else:
-        channel=hls[:,:,2]
-    binary_output = np.zeros_like(channel)
-    binary_output[(channel > thresh[0]) & (channel <= thresh[1])] = 1
-    return binary_output
+void hls_select(const cv::Mat& src,cv::Mat& dst,const char& channel='s',const int& thresh_min=0,const int& thresh_max=255){
+    cv::Mat hls,grad;
+    vector<cv::Mat> channels;
+    cv::cvtColor(src,hls,cv::COLOR_RGB2HLS);
+    //分离通道
+    cv::split(hls,channels);
+    //选择通道
+    switch (channel)
+    {
+        case 'h':
+            grad=channels.at(0);
+            break;
+        case 'l':
+            grad=channels.at(1);
+            break;
+        case 's':
+            grad=channels.at(2);
+            break;
+        default:
+            break;
+    }
+    //二值化
+    cv::inRange(grad,thresh_min,thresh_max,dst);
+    // cv::threshold(grad,dst,thresh_min,thresh_max,cv::THRESH_BINARY);
+}
 ```
 ```
-s_thresh = utils.hls_select(img,channel='s',thresh=(180, 255))
+mag_thresh(imge,mag,3,45,150);
 ```
 ![alt text][image6]
 
@@ -166,24 +197,20 @@ s_thresh = utils.hls_select(img,channel='s',thresh=(180, 255))
 
 以下为最终的阈值过滤组合：
 ```
-def thresholding(img):
-    x_thresh = utils.abs_sobel_thresh(img, orient='x', thresh_min=10 ,thresh_max=230)
-    mag_thresh = utils.mag_thresh(img, sobel_kernel=3, mag_thresh=(30, 150))
-    dir_thresh = utils.dir_threshold(img, sobel_kernel=3, thresh=(0.7, 1.3))
-    hls_thresh = utils.hls_select(img, thresh=(180, 255))
-    lab_thresh = utils.lab_select(img, thresh=(155, 200))
-    luv_thresh = utils.luv_select(img, thresh=(225, 255))
-    #Thresholding combination
-    threshholded = np.zeros_like(x_thresh)
-    threshholded[((x_thresh == 1) & (mag_thresh == 1)) | ((dir_thresh == 1) & (hls_thresh == 1)) | (lab_thresh == 1) | (luv_thresh == 1)] = 1
-
-    return threshholded
+abs_sobel_thresh(imge,absm,'x',55,200);//sobel边缘识别
+mag_thresh(imge,mag,3,45,150);
+hls_select(imge,hls,'s',160,255);
+dir_threshold(imge,dir,3,0.7,1.3);
+luv_select(imge,luv,'l',180,255);
+// lab_select(imge,lab,'b',126,127);
+     
+imgout=(absm&mag&luv)|(hls&luv);
 ```
 
 ![alt text][image7]
 
 #### 透视变换(perspective transform)
-这里使用"cv2.getPerspectiveTransform()"来获取变形矩阵(tranform matrix)，把阈值过滤后的二进制图片变形为鸟撒视角。
+这里使用"cv:getPerspectiveTransform()"来获取变形矩阵(tranform matrix)，把阈值过滤后的二进制图片变形为鸟撒视角。
 
 以下为定义的源点（source points）和目标点（destination points）
 
@@ -196,16 +223,15 @@ def thresholding(img):
 
 定义方法获取变形矩阵和逆变形矩阵：
 ```
-def get_M_Minv():
-    src = np.float32([[(203, 720), (585, 460), (695, 460), (1127, 720)]])
-    dst = np.float32([[(320, 720), (320, 0), (960, 0), (960, 720)]])
-    M = cv2.getPerspectiveTransform(src, dst)
-    Minv = cv2.getPerspectiveTransform(dst,src)
-    return M,Minv
+void get_M_Minv(const vector<cv::Point2f>& src,const vector<cv::Point2f>& dst,cv::Mat& M,cv::Mat& Minv){
+    M=cv::getPerspectiveTransform(src,dst);
+    Minv=cv::getPerspectiveTransform(dst,src);
+}
 ``` 
-然后使用"cv2.warpPerspective()"传入相关值获得变形图片(wrapped image)
+然后使用"cv:warpPerspective()"传入相关值获得变形图片(wrapped image)
 ```
-thresholded_wraped = cv2.warpPerspective(thresholded, M, img.shape[1::-1], flags=cv2.INTER_LINEAR)
+cv::warpPerspective(cimg,imge,M,img.size(),cv::INTER_LINEAR);
+
 ```
 
 以下为原图及变形后的效果：
@@ -226,150 +252,132 @@ thresholded_wraped = cv2.warpPerspective(thresholded, M, img.shape[1::-1], flags
 定位基点后，再使用使用滑动窗多项式拟合(sliding window polynomial fitting)来获取车道边界。这里使用9个200px宽的滑动窗来定位一条车道线像素：
 
 ```
-def find_line(binary_warped):
-    # Take a histogram of the bottom half of the image
-    histogram = np.sum(binary_warped[binary_warped.shape[0]//2:,:], axis=0)
-    # Find the peak of the left and right halves of the histogram
-    # These will be the starting point for the left and right lines
-    midpoint = np.int(histogram.shape[0]/2)
-    leftx_base = np.argmax(histogram[:midpoint])
-    rightx_base = np.argmax(histogram[midpoint:]) + midpoint
-    
-    # Choose the number of sliding windows
-    nwindows = 9
-    # Set height of windows
-    window_height = np.int(binary_warped.shape[0]/nwindows)
-    # Identify the x and y positions of all nonzero pixels in the image
-    nonzero = binary_warped.nonzero()
-    nonzeroy = np.array(nonzero[0])
-    nonzerox = np.array(nonzero[1])
-    # Current positions to be updated for each window
-    leftx_current = leftx_base
-    rightx_current = rightx_base
-    # Set the width of the windows +/- margin
-    margin = 100
-    # Set minimum number of pixels found to recenter window
-    minpix = 50
-    # Create empty lists to receive left and right lane pixel indices
-    left_lane_inds = []
-    right_lane_inds = []
-    
-    # Step through the windows one by one
-    for window in range(nwindows):
-        # Identify window boundaries in x and y (and right and left)
-        win_y_low = binary_warped.shape[0] - (window+1)*window_height
-        win_y_high = binary_warped.shape[0] - window*window_height
-        win_xleft_low = leftx_current - margin
-        win_xleft_high = leftx_current + margin
-        win_xright_low = rightx_current - margin
-        win_xright_high = rightx_current + margin
-        # Identify the nonzero pixels in x and y within the window
-        good_left_inds = ((nonzeroy >= win_y_low) & (nonzeroy < win_y_high) & 
-        (nonzerox >= win_xleft_low) &  (nonzerox < win_xleft_high)).nonzero()[0]
-        good_right_inds = ((nonzeroy >= win_y_low) & (nonzeroy < win_y_high) & 
-        (nonzerox >= win_xright_low) &  (nonzerox < win_xright_high)).nonzero()[0]
-        # Append these indices to the lists
-        left_lane_inds.append(good_left_inds)
-        right_lane_inds.append(good_right_inds)
-        # If you found > minpix pixels, recenter next window on their mean position
-        if len(good_left_inds) > minpix:
-            leftx_current = np.int(np.mean(nonzerox[good_left_inds]))
-        if len(good_right_inds) > minpix:        
-            rightx_current = np.int(np.mean(nonzerox[good_right_inds]))
-    
-    # Concatenate the arrays of indices
-    left_lane_inds = np.concatenate(left_lane_inds)
-    right_lane_inds = np.concatenate(right_lane_inds)
-    
-    # Extract left and right line pixel positions
-    leftx = nonzerox[left_lane_inds]
-    lefty = nonzeroy[left_lane_inds] 
-    rightx = nonzerox[right_lane_inds]
-    righty = nonzeroy[right_lane_inds] 
-    
-    # Fit a second order polynomial to each
-    left_fit = np.polyfit(lefty, leftx, 2)
-    right_fit = np.polyfit(righty, rightx, 2)
-    
-    return left_fit, right_fit, left_lane_inds, right_lane_inds
+void find_line(const cv::Mat& src,vector<cv::Point>& lp,vector<cv::Point>& rp,int& rightx_current,int& leftx_current,double& distance_from_center){
+    cv::Mat hist,nonzero,l,r;
+    vector<cv::Point> nonzerol,nonzeror,lpoint,rpoint;
+    int midpoint;
+    cv::Point leftx_base,rightx_base;
+    //选择滑窗个数
+    int nwindows = 9;
+    //设置窗口高度
+    int window_height = int(src.rows/nwindows);
+    //设置窗口宽度
+    int margin=50;
+    //设置非零像素坐标最少个数
+    int minpix=50;
+    //TODO 加入if设置图像连续性，如果leftx_current和rightx_current为零，则认为第一次执行，需要计算该两点，如果已经计算了，则不许再次计算。
+    //rowrange图像区域分割
+    //将图像处理为一行，以行相加为方法    
+    cv::reduce(src.rowRange(src.rows/2,src.rows),hist,0,cv::REDUCE_SUM,CV_32S);
+    midpoint=int(hist.cols/2);
+    //将hist分为左右分别储存，并找出最大值
+    //minMaxIdx针对多通道，minMaxLoc针对单通道
+    cv::minMaxLoc(hist.colRange(0,midpoint),NULL,NULL,NULL,&leftx_base);
+    cv::minMaxLoc(hist.colRange(midpoint,hist.cols),NULL,NULL,NULL,&rightx_base);
+    //左右车道线基础点
+    leftx_current=leftx_base.x;
+    rightx_current=rightx_base.x+midpoint;
+    // 提前存入该基础点坐标
+    lpoint.push_back(cv::Point(leftx_current,src.rows));
+    rpoint.push_back(cv::Point(rightx_current,src.rows));
+    for(int i=0;i<nwindows;i++){
+        int win_y_low=src.rows-(i+1)*window_height;
+        //计算选框x坐标点，并将计算结果限制在图像坐标内
+        int win_xleft_low = leftx_current - margin;
+        win_xleft_low=win_xleft_low>0?win_xleft_low:0;
+        win_xleft_low=win_xleft_low<src.rows?win_xleft_low:src.rows;
+        //int win_xleft_high = leftx_current + margin;
+        int win_xright_low = rightx_current - margin;
+        win_xright_low=win_xright_low>0?win_xright_low:0;
+        win_xright_low=win_xright_low<src.rows?win_xright_low:src.rows;
+        //int win_xright_high = rightx_current + margin;
+        //NOTE要确保参数都大于0，且在src图像范围内，不然会报错
+        //NOTE 设置为ROI矩形区域选择
+        l=src(cv::Rect(win_xleft_low,win_y_low,2*margin,window_height));
+        r=src(cv::Rect(win_xright_low,win_y_low,2*margin,window_height));
+        //NOTE 把像素值不为零的像素坐标存入矩阵
+        cv::findNonZero(l,nonzerol);
+        cv::findNonZero(r,nonzeror);
+        //计算每个选框的leftx_current和rightx_current中心点
+        if(nonzerol.size()>minpix){
+            int leftx=0;
+            for(auto& n:nonzerol){
+                leftx+=n.x;
+            }
+            leftx_current=win_xleft_low+leftx/nonzerol.size();
+        }
+        if(nonzeror.size()>minpix){
+            int rightx=0;
+            for(auto& n:nonzeror){
+                rightx+=n.x;
+            }
+            rightx_current=win_xright_low+rightx/nonzeror.size();
+        }
+        //将中心点坐标存入容器
+        lpoint.push_back(cv::Point(leftx_current,win_y_low));
+        rpoint.push_back(cv::Point(rightx_current,win_y_low));
+    }
+    //拟合左右车道线坐标
+    cv::Mat leftx = polyfit(lpoint,2);
+    cv::Mat rightx = polyfit(rpoint,2);
+    //计算拟合曲线坐标
+    lp=polyval(leftx,lpoint,2);
+    rp=polyval(rightx,rpoint,2);
+    //计算车道偏离距离
+    int lane_width=abs(rpoint.front().x-lpoint.front().x);
+    double lane_xm_per_pix=3.7/lane_width;
+    double veh_pos=(((rpoint.front().x+lpoint.front().x)*lane_xm_per_pix)/2);
+    double cen_pos=((src.cols*lane_xm_per_pix)/2);
+    distance_from_center=veh_pos-cen_pos;
+    // cout<<"dis"<<distance_from_center<<endl;
+    // cout<<lp<<endl;
+}
 ```
 以下为滑动窗多项式拟合(sliding window polynomial fitting)得到的结果：
 
 ![alt text][image11]
 
 #### 计算车道曲率及车辆相对车道中心位置
-利用检测车道得到的拟合值(find_line 返回的left_fit, right_fit)计算车道曲率，及车辆相对车道中心位置：
+利用检测车道得到的拟合值(find_line 返回的left_fit, right_fit)计算车道曲率，及车辆相对车道中心位置,代码在find_line中：
 ```
-def calculate_curv_and_pos(binary_warped,left_fit, right_fit):
-    # Define y-value where we want radius of curvature
-    ploty = np.linspace(0, binary_warped.shape[0]-1, binary_warped.shape[0] )
-    leftx = left_fit[0]*ploty**2 + left_fit[1]*ploty + left_fit[2]
-    rightx = right_fit[0]*ploty**2 + right_fit[1]*ploty + right_fit[2]
-    # Define conversions in x and y from pixels space to meters
-    ym_per_pix = 30/720 # meters per pixel in y dimension
-    xm_per_pix = 3.7/700 # meters per pixel in x dimension
-    y_eval = np.max(ploty)
-    # Fit new polynomials to x,y in world space
-    left_fit_cr = np.polyfit(ploty*ym_per_pix, leftx*xm_per_pix, 2)
-    right_fit_cr = np.polyfit(ploty*ym_per_pix, rightx*xm_per_pix, 2)
-    # Calculate the new radii of curvature
-    left_curverad = ((1 + (2*left_fit_cr[0]*y_eval*ym_per_pix + left_fit_cr[1])**2)**1.5) / np.absolute(2*left_fit_cr[0])
-    right_curverad = ((1 + (2*right_fit_cr[0]*y_eval*ym_per_pix + right_fit_cr[1])**2)**1.5) / np.absolute(2*right_fit_cr[0])
-    
-    curvature = ((left_curverad + right_curverad) / 2)
-    #print(curvature)
-    lane_width = np.absolute(leftx[719] - rightx[719])
-    lane_xm_per_pix = 3.7 / lane_width
-    veh_pos = (((leftx[719] + rightx[719]) * lane_xm_per_pix) / 2.)
-    cen_pos = ((binary_warped.shape[1] * lane_xm_per_pix) / 2.)
-    distance_from_center = veh_pos - cen_pos
-    return curvature,distance_from_center
+    int lane_width=abs(rpoint.front().x-lpoint.front().x);
+    double lane_xm_per_pix=3.7/lane_width;
+    double veh_pos=(((rpoint.front().x+lpoint.front().x)*lane_xm_per_pix)/2);
+    double cen_pos=((src.cols*lane_xm_per_pix)/2);
+    distance_from_center=veh_pos-cen_pos;
 ```
 
 
 #### 处理原图，展示信息
 
-使用逆变形矩阵把鸟瞰二进制图检测的车道镶嵌回原图，并高亮车道区域:
+使用逆变形矩阵把鸟瞰二进制图检测的车道镶嵌回原图，并高亮车道区域,使用"cv:putText()"方法处理原图展示车道曲率及车辆相对车道中心位置信息:
 ```
-def draw_area(undist,binary_warped,Minv,left_fit, right_fit):
-    # Generate x and y values for plotting
-    ploty = np.linspace(0, binary_warped.shape[0]-1, binary_warped.shape[0] )
-    left_fitx = left_fit[0]*ploty**2 + left_fit[1]*ploty + left_fit[2]
-    right_fitx = right_fit[0]*ploty**2 + right_fit[1]*ploty + right_fit[2]
-    # Create an image to draw the lines on
-    warp_zero = np.zeros_like(binary_warped).astype(np.uint8)
-    color_warp = np.dstack((warp_zero, warp_zero, warp_zero))
-    
-    # Recast the x and y points into usable format for cv2.fillPoly()
-    pts_left = np.array([np.transpose(np.vstack([left_fitx, ploty]))])
-    pts_right = np.array([np.flipud(np.transpose(np.vstack([right_fitx, ploty])))])
-    pts = np.hstack((pts_left, pts_right))
-    
-    # Draw the lane onto the warped blank image
-    cv2.fillPoly(color_warp, np.int_([pts]), (0,255, 0))
-    
-    # Warp the blank back to original image space using inverse perspective matrix (Minv)
-    newwarp = cv2.warpPerspective(color_warp, Minv, (undist.shape[1], undist.shape[0])) 
-    # Combine the result with the original image
-    result = cv2.addWeighted(undist, 1, newwarp, 0.3, 0)
-    return result
+void draw_area(const cv::Mat& src,vector<cv::Point>& lp,vector<cv::Point>& rp,const cv::Mat& Minv,double& distance_from_center){
+    vector<cv::Point> rflip,ptr;
+    cv::Mat colormask=cv::Mat::zeros(src.rows,src.cols,CV_8UC3);
+    cv::Mat dst,midst;
+    //绘制车道线
+    cv::polylines(colormask,lp,false,cv::Scalar(0,255,0),5);
+    cv::polylines(colormask,rp,false,cv::Scalar(0,0,255),5);
+    //反转坐标，以便绘制填充区域
+    cv::flip(rp,rflip,1);
+    //拼接坐标
+    cv::hconcat(lp,rflip,ptr);
+    //绘制填充区域
+    const cv::Point* em[1]={&ptr[0]};
+    int nop=(int)ptr.size();
+    cv::fillPoly(colormask,em,&nop,1,cv::Scalar(200,200,0));
+    //反变形
+    cv::warpPerspective(colormask,midst,Minv,src.size(),cv::INTER_LINEAR);
+    //将车道线图片和原始图片叠加
+    cv::addWeighted(src,1,midst,0.3,0,dst);
+    //绘制文字
+    cv::putText(dst,"distance bias:"+to_string(distance_from_center)+"m",cv::Point(50,50),cv::FONT_HERSHEY_SIMPLEX,1,cv::Scalar(255,255,255),2);
+    cv::imshow("video",dst);
+    // cv::waitKey(10000);
+}
 ```
-使用"cv2.putText()"方法处理原图展示车道曲率及车辆相对车道中心位置信息：
-```
-def draw_values(img, curvature, distance_from_center):
-    font = cv2.FONT_HERSHEY_SIMPLEX
-    radius_text = "Radius of Curvature: %sm" % (round(curvature))
 
-    if distance_from_center > 0:
-        pos_flag = 'right'
-    else:
-        pos_flag = 'left'
-
-    cv2.putText(img, radius_text, (100, 100), font, 1, (255, 255, 255), 2)
-    center_text = "Vehicle is %.3fm %s of center" % (abs(distance_from_center), pos_flag)
-    cv2.putText(img, center_text, (100, 150), font, 1, (255, 255, 255), 2)
-    return img
-```
 
 以下为测试图片处理后结果：
 
