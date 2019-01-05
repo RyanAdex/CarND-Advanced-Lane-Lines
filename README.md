@@ -31,7 +31,7 @@
 
 
 #### 相机校正(Camera Calibration)
-这里会使用opencv提供的方法通过棋盘格图片组计算相机校正矩阵(camera calibration matrix)和失真系数(distortion coefficients)。首先要得到棋盘格内角的世界坐标"object points"和对应图片坐标"image point"。假设棋盘格内角世界坐标的z轴为0，棋盘在(x,y)面上，则对于每张棋盘格图片组的图片而言，对应"object points"都是一样的。而通过使用openCv的cv:findChessboardCorners()，传入棋盘格的灰度(grayscale)图片和横纵内角点个数就可得到图片内角的"image point"。
+这里会使用opencv提供的方法通过棋盘格图片组计算相机校正矩阵(camera calibration matrix)和失真系数(distortion coefficients)。首先要得到棋盘格内角的世界坐标"object points"和对应图片坐标"image point"。假设棋盘格内角世界坐标的z轴为0，棋盘在(x,y)面上，则对于每张棋盘格图片组的图片而言，对应"object points"都是一样的。而通过使用openCv的cv::findChessboardCorners()，传入棋盘格的灰度(grayscale)图片和横纵内角点个数就可得到图片内角的"image point"。
 ```
 
 void get_obj_img_points(const vector<string> & images,const cv::Size & grid,const cv::Size& distance,cv::Mat& cameraMatirx,cv::Mat& distCoeffs){
@@ -71,7 +71,7 @@ void get_obj_img_points(const vector<string> & images,const cv::Size & grid,cons
 }
     
 ```
-然后使用上方法得到的`object_points` and `img_points` 传入`cv：calibrateCamera()` 方法中就可以计算出相机校正矩阵(camera calibration matrix)和失真系数(distortion coefficients)，再使用 `cv：undistort()`方法就可得到校正图片。
+然后使用上方法得到的`object_points` and `img_points` 传入`cv::calibrateCamera()` 方法中就可以计算出相机校正矩阵(camera calibration matrix)和失真系数(distortion coefficients)，再使用 `cv::undistort()`方法就可得到校正图片。
 ```
 def cal_undistort(img, objpoints, imgpoints):
     ret, mtx, dist, rvecs, tvecs = cv2.calibrateCamera(objpoints, imgpoints, img.shape[1::-1], None, None)
@@ -96,7 +96,7 @@ get_obj_img_points(imgs,grid,distance,cameraMatirx,distCoeffs);
 #### 阈值过滤(thresholding)
 这里会使用梯度阈值(gradient threshold)，颜色阈值(color threshold)等来处理校正后的图片，捕获车道线所在位置的像素。(这里的梯度指的是颜色变化的梯度)
 
-以下方法通过"cv：Sobel()"方法计算x轴方向或y轴方向的颜色变化梯度导数，并以此进行阈值过滤(thresholding),得到二进制图(binary image)：
+以下方法通过"cv::Sobel()"方法计算x轴方向或y轴方向的颜色变化梯度导数，并以此进行阈值过滤(thresholding),得到二进制图(binary image)：
 ```
 void abs_sobel_thresh(const cv::Mat& src,cv::Mat& dst,const char& orient='x',const int& thresh_min=0,const int& thresh_max=255){
     cv::Mat src_gray,grad;
@@ -210,7 +210,7 @@ imgout=(absm&mag&luv)|(hls&luv);
 ![alt text][image7]
 
 #### 透视变换(perspective transform)
-这里使用"cv:getPerspectiveTransform()"来获取变形矩阵(tranform matrix)，把阈值过滤后的二进制图片变形为鸟撒视角。
+这里使用"cv::getPerspectiveTransform()"来获取变形矩阵(tranform matrix)，把阈值过滤后的二进制图片变形为鸟撒视角。
 
 以下为定义的源点（source points）和目标点（destination points）
 
@@ -228,7 +228,7 @@ void get_M_Minv(const vector<cv::Point2f>& src,const vector<cv::Point2f>& dst,cv
     Minv=cv::getPerspectiveTransform(dst,src);
 }
 ``` 
-然后使用"cv:warpPerspective()"传入相关值获得变形图片(wrapped image)
+然后使用"cv::warpPerspective()"传入相关值获得变形图片(wrapped image)
 ```
 cv::warpPerspective(cimg,imge,M,img.size(),cv::INTER_LINEAR);
 
@@ -350,7 +350,7 @@ void find_line(const cv::Mat& src,vector<cv::Point>& lp,vector<cv::Point>& rp,in
 
 #### 处理原图，展示信息
 
-使用逆变形矩阵把鸟瞰二进制图检测的车道镶嵌回原图，并高亮车道区域,使用"cv:putText()"方法处理原图展示车道曲率及车辆相对车道中心位置信息:
+使用逆变形矩阵把鸟瞰二进制图检测的车道镶嵌回原图，并高亮车道区域,使用"cv::putText()"方法处理原图展示车道曲率及车辆相对车道中心位置信息:
 ```
 void draw_area(const cv::Mat& src,vector<cv::Point>& lp,vector<cv::Point>& rp,const cv::Mat& Minv,double& distance_from_center){
     vector<cv::Point> rflip,ptr;
