@@ -1,0 +1,3 @@
+"C:\Program Files\CMake\bin\cmake.exe" -E remove -f CMakeFiles\abc.dir/objects.a
+C:\Mingw\bin\ar.exe cr CMakeFiles\abc.dir/objects.a @CMakeFiles\abc.dir\objects1.rsp
+g++ -std=c++17   -Wl,--whole-archive CMakeFiles\abc.dir/objects.a -Wl,--no-whole-archive  -o ..\bin\abc.exe -Wl,--out-implib,..\bin\libabc.dll.a -Wl,--major-image-version,0,--minor-image-version,0 @CMakeFiles\abc.dir\linklibs.rsp

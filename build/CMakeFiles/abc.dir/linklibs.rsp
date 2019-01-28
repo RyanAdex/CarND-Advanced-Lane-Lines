@@ -1,0 +1,1 @@
+ -LC:/opencv/build/install/x64/mingw/lib -lopencv_core400 -lopencv_highgui400 -lopencv_calib3d400 -lopencv_imgproc400 -lopencv_imgcodecs400 -lopencv_videoio400 -lopencv_dnn400 -lopencv_tracking400 -lkernel32 -luser32 -lgdi32 -lwinspool -lshell32 -lole32 -loleaut32 -luuid -lcomdlg32 -ladvapi32 
