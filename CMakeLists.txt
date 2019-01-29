@@ -1,6 +1,6 @@
 CMAKE_MINIMUM_REQUIRED(VERSION 3.13.2)
 # 指定工程名称
-PROJECT(Ot)
+PROJECT(Object_Tracker)
 set(CMAKE_CXX_COMPILER "g++")
 set(CMAKE_CXX_FLAGS  "-std=c++17")
 # 导入OpenCV库
